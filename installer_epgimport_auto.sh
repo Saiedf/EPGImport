@@ -1,8 +1,8 @@
 #!/bin/sh
-
+#
 # ==========================================================
 # SCRIPT : DOWNLOAD AND INSTALL ENIGMA2 PLUGIN
-# Plugin   : EPGImport_Iet5
+# Plugin   : EPGImportiet5
 # Notes    : This installer automatically reads the latest
 #            version from ver.txt and installs the matching
 #            package without editing this script each release.
@@ -10,13 +10,13 @@
 # ==========================================================
 #
 # Example run:
-# wget -qO- "https://raw.githubusercontent.com/Saiedf/EPGImport_Iet5/main/installer_epgimport_iet5_auto.sh" | /bin/sh
+# wget -qO- "https://raw.githubusercontent.com/Saiedf/EPGImportiet5/main/installer_epgimportiet5_auto.sh" | /bin/sh
 #
 # Alternative:
-# wget -O /tmp/installer_epgimport_iet5_auto.sh "https://raw.githubusercontent.com/Saiedf/EPGImport_Iet5/main/installer_epgimport_iet5_auto.sh" && chmod 755 /tmp/installer_epgimport_iet5_auto.sh && /bin/sh /tmp/installer_epgimport_iet5_auto.sh
+# wget -O /tmp/installer_epgimportiet5_auto.sh "https://raw.githubusercontent.com/Saiedf/EPGImportiet5/main/installer_epgimportiet5_auto.sh" && chmod 755 /tmp/installer_epgimportiet5_auto.sh && /bin/sh /tmp/installer_epgimportiet5_auto.sh
 # ==========================================================
 
-PACKAGE_NAME='enigma2-plugin-extensions-epgimport_iet5'
+PACKAGE_NAME='enigma2-plugin-extensions-epgimportiet5'
 LEGACY_PACKAGE_NAME='enigma2-plugin-extensions-epgimport'
 PLUGIN_TITLE='EPGImport'
 PLUGIN_FOLDER='EPGImport'
