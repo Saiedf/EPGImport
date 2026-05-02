@@ -1,4 +1,6 @@
 #!/bin/sh
+
+#Script created by iet5
 #
 # ==========================================================
 # SCRIPT : DOWNLOAD AND INSTALL ENIGMA2 PLUGIN
@@ -25,6 +27,7 @@ REPO_USER='Saiedf'
 REPO_NAME='EPGImport'
 REPO_BRANCH='main'
 
+# Adjust once only if your GitHub layout is different
 VERSION_FILE_PATH='ver.txt'
 RELEASES_DIR='Releases'
 
@@ -602,6 +605,39 @@ install_package() {
     return 1
 }
 
+show_install_success_message() {
+    MSG_TITLE="$PLUGIN_TITLE"
+
+    say ''
+    say '============================================================='
+    say " $PLUGIN_TITLE has been installed successfully."
+    say " Version: $PLUGIN_VERSION"
+    say ' Enigma2 will restart now.'
+    say '============================================================='
+    say ''
+
+    # OpenATV / OpenPLI / OpenVision / many OE images with WebInterface
+    if have wget; then
+        wget -qO- "http://127.0.0.1/web/message?text=$PLUGIN_TITLE%20version%20$PLUGIN_VERSION%20has%20been%20installed%20successfully.%0AEnigma2%20will%20restart%20now.&type=1&timeout=8" >/dev/null 2>&1
+    elif have curl; then
+        curl -fs "http://127.0.0.1/web/message?text=$PLUGIN_TITLE%20version%20$PLUGIN_VERSION%20has%20been%20installed%20successfully.%0AEnigma2%20will%20restart%20now.&type=1&timeout=8" >/dev/null 2>&1
+    fi
+
+    # DreamOS / Dreambox images when dbus notifications are available
+    if have dbus-send; then
+        dbus-send --system --type=method_call \
+            --dest=org.freedesktop.Notifications \
+            /org/freedesktop/Notifications \
+            org.freedesktop.Notifications.Notify \
+            string:"$MSG_TITLE" uint32:0 string:"" \
+            string:"Installation completed" \
+            string:"$PLUGIN_TITLE version $PLUGIN_VERSION has been installed successfully. Enigma2 will restart now." \
+            array:string: dict:string:variant: int32:8000 >/dev/null 2>&1
+    fi
+
+    sleep 8
+}
+
 restart_enigma2() {
     if have systemctl; then
         sleep 2
@@ -718,6 +754,7 @@ if [ $DOWNLOAD_RET -eq 0 ] && [ -s "$MY_TMP_FILE" ]; then
     say ''
     if [ $MY_RESULT -eq 0 ]; then
         say '>>>> SUCCESSFULLY INSTALLED <<<<'
+        show_install_success_message
         say ''
         say '>>>> RESTARTING ENIGMA2    <<<<'
         restart_enigma2
