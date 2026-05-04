@@ -114,8 +114,10 @@ fetch_version() {
         return 1
     fi
 
+    # Accept versions like: 3.4, 3.4A, 3.4a, 3.4-beta, 3.4_1
+    # Reject only unsafe characters, spaces, slashes, or empty values.
     case "$VERSION_RAW" in
-        *[!0-9.]*)
+        *[!0-9A-Za-z._-]*|.*|-*|_*|*/*|*\\*|*[[:space:]]*)
             return 1
             ;;
     esac
