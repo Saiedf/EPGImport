@@ -1,5 +1,4 @@
 #!/bin/sh
-
 #Script created by iet5
 #
 # ==========================================================
@@ -12,10 +11,10 @@
 # ==========================================================
 #
 # Example run:
-# wget -qO- "https://raw.githubusercontent.com/Saiedf/EPGImportiet5/main/installer_epgimportiet5_auto.sh" | /bin/sh
+# wget -qO- "https://raw.githubusercontent.com/Saiedf/EPGImportiet5/main/installer_epgimportiet5_auto.sh?nocache=$(date +%s)" | /bin/sh
 #
 # Alternative:
-# wget -O /tmp/installer_epgimportiet5_auto.sh "https://raw.githubusercontent.com/Saiedf/EPGImportiet5/main/installer_epgimportiet5_auto.sh" && chmod 755 /tmp/installer_epgimportiet5_auto.sh && /bin/sh /tmp/installer_epgimportiet5_auto.sh
+# wget -O /tmp/installer_epgimportiet5_auto.sh "https://raw.githubusercontent.com/Saiedf/EPGImportiet5/main/installer_EPGImportiet5_auto.sh?nocache=$(date +%s)" && chmod 755 /tmp/installer_EPGImportiet5_auto.sh && /bin/sh /tmp/installer_EPGImportiet5_auto.sh
 # ==========================================================
 
 PACKAGE_NAME='enigma2-plugin-extensions-epgimportiet5'
@@ -106,7 +105,7 @@ download_to_stdout() {
 }
 
 fetch_version() {
-    VERSION_URL="https://raw.githubusercontent.com/$REPO_USER/$REPO_NAME/$REPO_BRANCH/$VERSION_FILE_PATH"
+    VERSION_URL="https://raw.githubusercontent.com/$REPO_USER/$REPO_NAME/$REPO_BRANCH/$VERSION_FILE_PATH?nocache=$(date +%s)"
     VERSION_RAW=$(download_to_stdout "$VERSION_URL" 2>/dev/null | sed -n '1p')
     VERSION_RAW=$(trim "$VERSION_RAW")
 
@@ -383,7 +382,7 @@ pick_ipk_file() {
 
 build_url() {
     BASE_URL="https://raw.githubusercontent.com/$REPO_USER/$REPO_NAME/$REPO_BRANCH/$RELEASES_DIR"
-    PKG_URL="$BASE_URL/$PKG_FILE"
+    PKG_URL="$BASE_URL/$PKG_FILE?nocache=$(date +%s)"
 }
 
 has_deb_support() {
@@ -663,7 +662,7 @@ PLUGIN_VERSION=$(fetch_version)
 if [ $? -ne 0 ] || [ -z "$PLUGIN_VERSION" ]; then
     say ''
     say 'Failed to read version from ver.txt'
-    say "URL: https://raw.githubusercontent.com/$REPO_USER/$REPO_NAME/$REPO_BRANCH/$VERSION_FILE_PATH"
+    say "URL: $VERSION_URL"
     exit 1
 fi
 
