@@ -22,6 +22,14 @@ LEGACY_PACKAGE_NAME='enigma2-plugin-extensions-epgimport'
 PLUGIN_TITLE='EPGImport'
 PLUGIN_FOLDER='EPGImport'
 
+# Installation paths
+# The plugin directory is cleaned/recreated during a clean install.
+# /etc/epgimport is USER DATA: never delete, empty, overwrite or restore it.
+# It is created only when it does not already exist.
+PLUGIN_EXTENSIONS_PATH="/usr/lib/enigma2/python/Plugins/Extensions/$PLUGIN_FOLDER"
+PLUGIN_SYSTEM_PATH="/usr/lib/enigma2/python/Plugins/SystemPlugins/$PLUGIN_FOLDER"
+EPGIMPORT_CONFIG_DIR='/etc/epgimport'
+
 REPO_USER='Saiedf'
 REPO_NAME='EPGImport'
 REPO_BRANCH='main'
@@ -439,8 +447,6 @@ detect_installed_package() {
 
 find_old_plugin_paths() {
     FOUND_PATHS=''
-    PLUGIN_EXTENSIONS_PATH="/usr/lib/enigma2/python/Plugins/Extensions/$PLUGIN_FOLDER"
-    PLUGIN_SYSTEM_PATH="/usr/lib/enigma2/python/Plugins/SystemPlugins/$PLUGIN_FOLDER"
 
     if [ -d "$PLUGIN_EXTENSIONS_PATH" ]; then
         FOUND_PATHS="$FOUND_PATHS $PLUGIN_EXTENSIONS_PATH"
@@ -453,9 +459,149 @@ find_old_plugin_paths() {
     echo "$FOUND_PATHS" | sed 's/^ *//'
 }
 
+ensure_install_directories() {
+    # Main plugin folder: recreate it empty before package extraction if needed.
+    if [ ! -d "$PLUGIN_EXTENSIONS_PATH" ]; then
+        mkdir -p "$PLUGIN_EXTENSIONS_PATH" || return 1
+    fi
+
+    # /etc/epgimport: never clean, delete, overwrite or restore.
+    # Create it only when it is missing.
+    if [ ! -d "$EPGIMPORT_CONFIG_DIR" ]; then
+        mkdir -p "$EPGIMPORT_CONFIG_DIR" || return 1
+        say "Created missing config directory: $EPGIMPORT_CONFIG_DIR"
+    else
+        say "Keeping existing config directory untouched: $EPGIMPORT_CONFIG_DIR"
+    fi
+
+    return 0
+}
+
+mask_package_config_files_before_remove() {
+    # Protect /etc/epgimport from the OLD package manager metadata/scripts.
+    # This function never reads/writes files inside /etc/epgimport itself.
+    MASK_MANAGER="$1"
+    MASK_PACKAGE="$2"
+    MASK_BACKUP_DIR="/tmp/.epgimport-remove-mask-$$"
+    MASK_INFO_DIR=''
+
+    case "$MASK_MANAGER" in
+        dpkg) MASK_INFO_DIR='/var/lib/dpkg/info' ;;
+        opkg) MASK_INFO_DIR='/var/lib/opkg/info' ;;
+        *) return 0 ;;
+    esac
+
+    [ -d "$MASK_INFO_DIR" ] || return 0
+    mkdir -p "$MASK_BACKUP_DIR" || return 1
+    MASK_CHANGED=0
+
+    for MASK_SUFFIX in list conffiles; do
+        MASK_FILE="$MASK_INFO_DIR/$MASK_PACKAGE.$MASK_SUFFIX"
+        if [ -f "$MASK_FILE" ] && grep -q "^$EPGIMPORT_CONFIG_DIR\(/\|$\)" "$MASK_FILE" 2>/dev/null; then
+            cp -p "$MASK_FILE" "$MASK_BACKUP_DIR/$MASK_PACKAGE.$MASK_SUFFIX" || return 1
+            grep -v "^$EPGIMPORT_CONFIG_DIR\(/\|$\)" "$MASK_FILE" > "$MASK_FILE.ajtmp" || true
+            mv "$MASK_FILE.ajtmp" "$MASK_FILE" || return 1
+            MASK_CHANGED=1
+        fi
+    done
+
+    # If old removal scripts explicitly touch /etc/epgimport, neutralize only
+    # those scripts temporarily. Plugin files are still removed by dpkg/opkg
+    # plus remove_old_plugin_paths().
+    for MASK_SUFFIX in prerm postrm; do
+        MASK_FILE="$MASK_INFO_DIR/$MASK_PACKAGE.$MASK_SUFFIX"
+        if [ -f "$MASK_FILE" ] && grep -q "$EPGIMPORT_CONFIG_DIR" "$MASK_FILE" 2>/dev/null; then
+            cp -p "$MASK_FILE" "$MASK_BACKUP_DIR/$MASK_PACKAGE.$MASK_SUFFIX" || return 1
+            cat > "$MASK_FILE" <<'EOF_AJ_SAFE_REMOVE'
+#!/bin/sh
+# Temporarily neutralized by EPGImportiet5 installer.
+# /etc/epgimport must remain untouched.
+exit 0
+EOF_AJ_SAFE_REMOVE
+            chmod 755 "$MASK_FILE" || return 1
+            MASK_CHANGED=1
+        fi
+    done
+
+    MASK_INFO_DIR_ACTIVE="$MASK_INFO_DIR"
+    MASK_PACKAGE_ACTIVE="$MASK_PACKAGE"
+    MASK_CHANGED_ACTIVE="$MASK_CHANGED"
+    return 0
+}
+
+restore_package_remove_metadata_on_failure() {
+    [ "${MASK_CHANGED_ACTIVE:-0}" -eq 1 ] || return 0
+    [ -d "${MASK_BACKUP_DIR:-}" ] || return 0
+    [ -n "${MASK_INFO_DIR_ACTIVE:-}" ] || return 0
+    [ -n "${MASK_PACKAGE_ACTIVE:-}" ] || return 0
+
+    for MASK_SUFFIX in list conffiles prerm postrm; do
+        MASK_SAVED="$MASK_BACKUP_DIR/$MASK_PACKAGE_ACTIVE.$MASK_SUFFIX"
+        if [ -f "$MASK_SAVED" ]; then
+            cp -p "$MASK_SAVED" "$MASK_INFO_DIR_ACTIVE/$MASK_PACKAGE_ACTIVE.$MASK_SUFFIX" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+cleanup_package_remove_mask() {
+    [ -n "${MASK_BACKUP_DIR:-}" ] && rm -rf "$MASK_BACKUP_DIR" >/dev/null 2>&1
+    MASK_CHANGED_ACTIVE=0
+    MASK_INFO_DIR_ACTIVE=''
+    MASK_PACKAGE_ACTIVE=''
+}
+
+sanitize_deb_config_payload() {
+    # If the downloaded DEB contains /etc/epgimport files, remove those payload
+    # entries from the temporary DEB so dpkg cannot overwrite existing user data.
+    [ "$PKG_TYPE" = 'deb' ] || return 0
+
+    if ! have dpkg-deb; then
+        say 'dpkg-deb was not found; cannot guarantee protection of /etc/epgimport.'
+        return 1
+    fi
+
+    if ! dpkg-deb -c "$MY_TMP_FILE" 2>/dev/null | awk '{print $NF}' | grep -q '^\./etc/epgimport\(/\|$\)'; then
+        return 0
+    fi
+
+    SAFE_ROOT="/tmp/.epgimport-deb-safe-$$"
+    SAFE_DEB="$MY_TMP_FILE.safe"
+    rm -rf "$SAFE_ROOT" "$SAFE_DEB" >/dev/null 2>&1
+    mkdir -p "$SAFE_ROOT" || return 1
+
+    say "Protecting existing $EPGIMPORT_CONFIG_DIR from package payload..."
+
+    dpkg-deb -R "$MY_TMP_FILE" "$SAFE_ROOT" >/dev/null 2>&1 || {
+        rm -rf "$SAFE_ROOT" "$SAFE_DEB" >/dev/null 2>&1
+        return 1
+    }
+
+    rm -rf "$SAFE_ROOT/etc/epgimport" >/dev/null 2>&1
+
+    if [ -f "$SAFE_ROOT/DEBIAN/conffiles" ]; then
+        grep -v "^$EPGIMPORT_CONFIG_DIR\(/\|$\)" "$SAFE_ROOT/DEBIAN/conffiles" > "$SAFE_ROOT/DEBIAN/conffiles.ajtmp" || true
+        mv "$SAFE_ROOT/DEBIAN/conffiles.ajtmp" "$SAFE_ROOT/DEBIAN/conffiles"
+    fi
+
+    dpkg-deb -b "$SAFE_ROOT" "$SAFE_DEB" >/dev/null 2>&1 || {
+        rm -rf "$SAFE_ROOT" "$SAFE_DEB" >/dev/null 2>&1
+        return 1
+    }
+
+    mv "$SAFE_DEB" "$MY_TMP_FILE" || {
+        rm -rf "$SAFE_ROOT" "$SAFE_DEB" >/dev/null 2>&1
+        return 1
+    }
+
+    rm -rf "$SAFE_ROOT" >/dev/null 2>&1
+    say "$EPGIMPORT_CONFIG_DIR payload excluded; existing contents will remain untouched."
+    return 0
+}
+
 remove_installed_package() {
     REMOVED_BY_MANAGER=0
     PACKAGE_TO_REMOVE=''
+    REMOVE_MANAGER=''
 
     if [ -z "$OLD_VERSION" ]; then
         return 0
@@ -465,35 +611,44 @@ remove_installed_package() {
     [ -z "$PACKAGE_TO_REMOVE" ] && PACKAGE_TO_REMOVE="$PACKAGE_NAME"
 
     if [ "$OLD_MANAGER" = 'dpkg' ] && have dpkg; then
-        dpkg -r "$PACKAGE_TO_REMOVE"
-        REMOVED_BY_MANAGER=$?
+        REMOVE_MANAGER='dpkg'
     elif [ "$OLD_MANAGER" = 'opkg' ] && have opkg; then
-        opkg remove "$PACKAGE_TO_REMOVE"
-        REMOVED_BY_MANAGER=$?
+        REMOVE_MANAGER='opkg'
     elif have dpkg; then
-        dpkg -r "$PACKAGE_TO_REMOVE"
-        REMOVED_BY_MANAGER=$?
+        REMOVE_MANAGER='dpkg'
     elif have opkg; then
-        opkg remove "$PACKAGE_TO_REMOVE"
+        REMOVE_MANAGER='opkg'
+    else
+        return 1
+    fi
+
+    mask_package_config_files_before_remove "$REMOVE_MANAGER" "$PACKAGE_TO_REMOVE" || {
+        say "Failed to protect $EPGIMPORT_CONFIG_DIR before old package removal."
+        cleanup_package_remove_mask
+        return 1
+    }
+
+    if [ "$REMOVE_MANAGER" = 'dpkg' ]; then
+        dpkg -r "$PACKAGE_TO_REMOVE"
         REMOVED_BY_MANAGER=$?
     else
-        REMOVED_BY_MANAGER=1
+        opkg remove "$PACKAGE_TO_REMOVE"
+        REMOVED_BY_MANAGER=$?
     fi
 
     if [ $REMOVED_BY_MANAGER -ne 0 ]; then
+        restore_package_remove_metadata_on_failure
+        cleanup_package_remove_mask
         return $REMOVED_BY_MANAGER
     fi
 
+    cleanup_package_remove_mask
     return 0
 }
 
 remove_old_plugin_paths() {
     PATH_REMOVE_RET=0
     OLD_PLUGIN_PATHS="$(find_old_plugin_paths)"
-
-    if [ -z "$OLD_PLUGIN_PATHS" ]; then
-        return 0
-    fi
 
     for OLD_PLUGIN_PATH in $OLD_PLUGIN_PATHS; do
         if [ -d "$OLD_PLUGIN_PATH" ]; then
@@ -506,13 +661,24 @@ remove_old_plugin_paths() {
         fi
     done
 
-    return $PATH_REMOVE_RET
+    if [ $PATH_REMOVE_RET -ne 0 ]; then
+        return $PATH_REMOVE_RET
+    fi
+
+    # Recreate only the main Extensions plugin folder.
+    # /etc/epgimport is preserved; created only if missing.
+    ensure_install_directories || return 1
+    return 0
 }
 
 confirm_old_version_removal() {
     OLD_PLUGIN_PATHS="$(find_old_plugin_paths)"
 
     if [ -z "$OLD_VERSION" ] && [ -z "$OLD_PLUGIN_PATHS" ]; then
+        ensure_install_directories || {
+            say 'Failed to prepare installation directories.'
+            exit 1
+        }
         return 0
     fi
 
@@ -742,6 +908,23 @@ download_package
 DOWNLOAD_RET=$?
 
 if [ $DOWNLOAD_RET -eq 0 ] && [ -s "$MY_TMP_FILE" ]; then
+    # Prevent a DEB payload from writing into /etc/epgimport.
+    sanitize_deb_config_payload
+    SANITIZE_RET=$?
+    if [ $SANITIZE_RET -ne 0 ]; then
+        say ''
+        say "Failed to protect $EPGIMPORT_CONFIG_DIR. Installation aborted."
+        exit 1
+    fi
+
+    ensure_install_directories
+    DIR_RET=$?
+    if [ $DIR_RET -ne 0 ]; then
+        say ''
+        say 'Failed to prepare installation directories.'
+        exit 1
+    fi
+
     say ''
     say "$MY_SEP"
     say 'Installation started'
